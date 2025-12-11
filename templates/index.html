@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TP3IA01 - Conseiller Sportif</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body { 
+            background: linear-gradient(135deg, #e0f7fa 0%, #e8f5e9 100%); 
+            min-height: 100vh; 
+            padding: 40px 0; 
+        }
+        
+        .wizard-card { 
+            border: none; 
+            border-radius: 20px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08); 
+            overflow: hidden; 
+            background: white;
+            width: 100%;
+            max-width: 1200px; /* Largeur max augmentée */
+            margin: 0 auto;
+        }
+        
+        .card-header { background: #198754; color: white; padding: 20px; text-align: center; }
+        
+        /* Carte plus haute */
+        #map { height: 500px; width: 100%; border-radius: 10px; margin-top: 20px; display: none; border: 2px solid #ddd; }
+        
+        /* Panneau de détails */
+        #route-details {
+            background: white; border-radius: 10px; padding: 15px; margin-top: 15px;
+            border-left: 5px solid #198754; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            display: none; text-align: left; animation: fadeIn 0.3s;
+        }
+        #route-details h5 { color: #198754; margin-bottom: 5px; }
+        
+        .badge-velo { background-color: #0d6efd; color: white; padding: 8px 15px; border-radius: 20px; font-size: 0.9em;}
+        .badge-marche { background-color: #dc3545; color: white; padding: 8px 15px; border-radius: 20px; font-size: 0.9em;}
+
+        /* Autocomplete */
+        .suggestions-wrapper { position: relative; }
+        .list-group-suggestions { position: absolute; top: 100%; left: 0; right: 0; z-index: 1000; max-height: 250px; overflow-y: auto; box-shadow: 0 5px 15px rgba(0,0,0,0.1); border-radius: 0 0 10px 10px; background: white; }
+        .list-group-item-action { cursor: pointer; }
+        .list-group-item-action:hover { background-color: #e8f5e9; color: #198754; }
+        
+        .step { display: none; }
+        .step.active { display: block; animation: slideUp 0.4s ease-out; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid"> 
+    <div class="row justify-content-center">
+        <div class="col-md-10 col-lg-10"> 
+            <div class="wizard-card mx-auto"> 
+                <div class="card-header">
+                    <h3 class="m-0"><i class="bi bi-tree-fill"></i> Conseiller Sportif</h3>
+                </div>
+                
+                <div class="card-body p-5">
+
+                    <form id="mainForm">
+                        
+                        <div class="step active" id="step1">
+                            <h4 class="mb-4 text-center">Entrez votre localisation :</h4>
+                            <div class="row justify-content-center">
+                                <div class="col-md-8">
+                                    <div class="suggestions-wrapper">
+                                        <div class="input-group input-group-lg">
+                                            <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                                            <input type="text" class="form-control" id="cityInput" placeholder="Entrez une ville" autocomplete="off">
+                                            <button class="btn btn-outline-success" type="button" id="btnGps" title="Utiliser ma position GPS">
+                                                <i class="bi bi-geo-alt-fill"></i> Ma Position
+                                            </button>
+                                        </div>
+                                        <div class="list-group list-group-suggestions d-none" id="suggestionsList"></div>
+                                    </div>
+                                    <small class="text-muted d-block mt-2 text-center" id="gpsStatus">La recherche se fera dans un rayon de 5km autour du point choisi.</small>
+                                </div>
+                            </div>
+                            <input type="hidden" id="lat"><input type="hidden" id="lon">
+                            <div class="d-grid mt-5 col-md-6 mx-auto">
+                                <button type="button" class="btn btn-success btn-lg" onclick="goToStep(2)" id="btnNext1" disabled>Continuer <i class="bi bi-arrow-right"></i></button>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step2">
+                            <h4 class="mb-4 text-center">Votre Profil :</h4>
+                            <div class="row justify-content-center">
+                                <div class="col-md-8">
+                                    <label class="form-label fw-bold">Type d'activité</label>
+                                    <div class="row g-3 mb-4">
+                                        <div class="col-4">
+                                            <input type="radio" class="btn-check" name="activite" id="act1" value="marche" checked>
+                                            <label class="btn btn-outline-success w-100 py-4 shadow-sm" for="act1">
+                                                <i class="bi bi-person-fill display-6"></i><br><span class="mt-2 d-block">Marche</span>
+                                            </label>
+                                        </div>
+                                        <div class="col-4">
+                                            <input type="radio" class="btn-check" name="activite" id="act2" value="course">
+                                            <label class="btn btn-outline-success w-100 py-4 shadow-sm" for="act2">
+                                                <i class="bi bi-stopwatch display-6"></i><br><span class="mt-2 d-block">Course</span>
+                                            </label>
+                                        </div>
+                                        <div class="col-4">
+                                            <input type="radio" class="btn-check" name="activite" id="act3" value="velo">
+                                            <label class="btn btn-outline-success w-100 py-4 shadow-sm" for="act3">
+                                                <i class="bi bi-bicycle display-6"></i><br><span class="mt-2 d-block">Vélo</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    
+                                    <label class="form-label fw-bold">Votre niveau d'expérience</label>
+                                    <select class="form-select form-select-lg mb-4" id="niveau">
+                                        <option value="debutant">Débutant (Loisir)</option>
+                                        <option value="intermediaire">Intermédiaire (Régulier)</option>
+                                        <option value="experimente">Expérimenté (Sportif)</option>
+                                    </select>
+                                    
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between mt-4 px-5">
+                                <button type="button" class="btn btn-light btn-lg" onclick="goToStep(1)">Retour</button>
+                                <button type="button" class="btn btn-success btn-lg" onclick="goToStep(3)">Suivant</button>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step3">
+                            <h4 class="mb-4 text-center">Conditions du jour</h4>
+                            <div class="row justify-content-center">
+                                <div class="col-md-8">
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-bold">Fatigue</label>
+                                            <select class="form-select form-select-lg" id="fatigue">
+                                                <option value="faux">En pleine forme</option>
+                                                <option value="vrai">Un peu fatigué</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-bold">Douleur</label>
+                                            <select class="form-select form-select-lg" id="douleur">
+                                                <option value="aucune">Aucune</option>
+                                                <option value="legere">Légère</option>
+                                                <option value="forte">Forte</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-bold">Bouteille d'eau</label>
+                                            <select class="form-select form-select-lg" id="eau">
+                                                <option value="vrai">Oui</option>
+                                                <option value="faux">Non</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-bold">Objectif de distance</label>
+                                            <select class="form-select form-select-lg" id="distance">
+                                                <option value="courte">Courte</option>
+                                                <option value="moyenne" selected>Moyenne</option>
+                                                <option value="longue">Longue</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-bold">Météo</label>
+                                            <select class="form-select form-select-lg" id="meteo">
+                                                <option value="soleil">Ensoleillé</option>
+                                                <option value="nuageux">Nuageux</option>
+                                                <option value="pluie_faible">Pluie faible</option>
+                                                <option value="pluie_forte">Pluie forte</option>
+                                                <option value="orage">Orageux</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-bold">Vent</label>
+                                            <select class="form-select form-select-lg" id="vent">
+                                                <option value="nul">Nul</option>
+                                                <option value="faible">Faible</option>
+                                                <option value="moyen">Moyen</option>
+                                                <option value="fort">Fort</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between mt-5 px-5">
+                                <button type="button" class="btn btn-light btn-lg" onclick="goToStep(2)">Retour</button>
+                                <button type="button" class="btn btn-primary btn-lg" onclick="submitForm()">Recherche de trajets adaptés</button>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step4">
+                            <div id="loadingSection" class="text-center">
+                                <div class="spinner-border text-success" style="width: 3rem; height: 3rem;"></div>
+                                <h4 class="mt-3">Recherche d'itinéraires...</h4>
+                            </div>
+                            
+                            <div id="resultsSection" class="d-none">
+                                <div class="alert alert-success text-center fw-bold shadow-sm" id="resultText"></div>
+                                
+                                <div id="map"></div>
+
+                                <div id="route-details">
+                                    <h5><i class="bi bi-info-circle"></i> Détails de l'itinéraire</h5>
+                                    <p id="detail-content" class="text-muted">...</p>
+                                </div>
+
+                                <div class="card mt-4 border-success">
+                                    <div class="card-header bg-success text-white">
+                                        <h4 class="m-0"></i> Le Système Expert</h4>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="text-center mb-4">
+                                            <p>Analysez ces itinéraires selon votre profil (Fatigue, Météo, Niveau) :</p>
+                                            <button type="button" class="btn btn-outline-primary btn-lg me-2" onclick="runExpert('avant')">
+                                                <i class="bi bi-gear-wide-connected"></i> Lancer Chaînage Avant
+                                            </button>
+                                            <button type="button" class="btn btn-outline-primary btn-lg me-2" onclick="runExpert('arriere')">
+                                                <i class="bi bi-arrow-counterclockwise"></i> Lancer Chaînage Arrière
+                                            </button>
+                                            <small class="text-danger d-block mt-2">
+                                                <i class="bi bi-search"></i> Le chaînage arrière tente de vérifier l'hypothèse : <br>
+                                                <code class="fw-bold text-dark" style="background-color: #f8d7da; padding: 2px 5px; border-radius: 4px;">recommandation_globale = danger</code>
+                                            </small>
+                                        </div>
+
+                                        <div class="row">
+                                            <div class="col-md-5">
+                                                <h5 class="text-success border-bottom pb-2">Itinéraires Compatibles</h5>
+                                                <div id="recommendationList" class="list-group mt-3">
+                                                    <div class="text-muted fst-italic text-center py-3">Lancez le moteur pour voir les résultats...</div>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-7">
+                                                <h5 class="text-secondary border-bottom pb-2">Logs du Raisonnement (Lisp)</h5>
+                                                <div class="bg-dark text-white p-3 rounded font-monospace" id="expertLogs" style="height: 300px; overflow-y: auto; font-size: 0.85rem;">
+                                                    <span class="text-secondary">En attente d'exécution...</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- MAP & AFFICHAGE ---
+    let selectedLayer = null;
+    let map = null;
+
+    function initMap(lat, lon, routes) {
+        document.getElementById('map').style.display = 'block';
+        if(map) { map.remove(); map = null; }
+        
+        map = L.map('map').setView([lat, lon], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
+        
+        // Marqueur Utilisateur
+        const userIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: "<div style='background-color:#198754;width:20px;height:20px;border-radius:50%;border:3px solid white;box-shadow:0 0 5px rgba(0,0,0,0.5);'></div>",
+            iconSize: [20, 20], iconAnchor: [10, 10]
+        });
+        L.marker([lat, lon], {icon: userIcon}).addTo(map).bindPopup("<b>Point de départ</b>");
+
+        const allRoutesGroup = L.featureGroup();
+
+        routes.forEach((route, index) => {
+            if (!route.segments || route.segments.length === 0) return;
+
+            // COULEURS DYNAMIQUES HSL
+            const hue = (index * (360 / routes.length)) % 360;
+            const baseColor = `hsl(${hue}, 70%, 45%)`; 
+
+            const routeLayer = L.featureGroup();
+            routeLayer.info = route; 
+            routeLayer.baseColor = baseColor;
+
+            route.segments.forEach(segment => {
+                const latlngs = segment.map(p => [p.lat, p.lon]);
+                const polyline = L.polyline(latlngs, {
+                    color: baseColor, weight: 5, opacity: 0.8, className: 'route-line'
+                });
+                routeLayer.addLayer(polyline);
+            });
+
+            // Interaction
+            routeLayer.on('mouseover', function() { if (this !== selectedLayer) this.setStyle({ weight: 8, opacity: 1 }); });
+            routeLayer.on('mouseout', function() { if (this !== selectedLayer) this.setStyle({ weight: 5, opacity: 0.8 }); });
+            routeLayer.on('click', function() {
+                if (selectedLayer) selectedLayer.setStyle({ color: selectedLayer.baseColor, weight: 5, opacity: 0.8 });
+                this.setStyle({ color: '#FFD700', weight: 10, opacity: 1 });
+                this.bringToFront();
+                selectedLayer = this;
+                updateInfoPanel(this.info);
+            });
+
+            routeLayer.addTo(map);
+            allRoutesGroup.addLayer(routeLayer);
+        });
+
+        if (routes.length > 0) map.fitBounds(allRoutesGroup.getBounds(), {padding: [50, 50]});
+    }
+
+    function updateInfoPanel(route) {
+        const panel = document.getElementById('route-details');
+        let badgeClass = route.type === 'velo' ? 'badge-velo' : 'badge-marche';
+        
+        // ICONES CORRIGÉES
+        let icon = route.type === 'velo' ? '<i class="bi bi-bicycle"></i>' : '<i class="bi bi-person-fill"></i>';
+        let label = route.type === 'velo' ? 'Vélo' : 'Marche';
+        
+        // DIFFICULTÉ CORRIGÉE
+        const diffLabel = (route.diff || 'moyenne').charAt(0).toUpperCase() + (route.diff || 'moyenne').slice(1);
+
+        panel.style.display = 'block';
+        panel.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <h3 class="mb-0 text-success">${route.name}</h3>
+                <span class="${badgeClass}">${icon} ${label}</span>
+            </div>
+            <hr>
+            <div class="row mt-3 text-center">
+                <div class="col-4">
+                    <div class="text-muted small text-uppercase">Distance</div>
+                    <div class="fs-4 fw-bold">${route.km} <small>km</small></div>
+                </div>
+
+                <div class="col-3">
+                <div class="text-muted small text-uppercase">Dénivelé</div>
+                <div class="fs-5 fw-bold text-success">+${route.denivele} <small>m</small></div>
+                </div>
+
+                <div class="col-4">
+                    <div class="text-muted small text-uppercase">Difficulté</div>
+                    <div class="fs-5 fw-bold text-dark">${diffLabel}</div>
+                </div>
+                <div class="col-4">
+                    <div class="text-muted small text-uppercase">Terrain</div>
+                    <div class="fs-5">Mixte</div>
+                </div>
+            </div>
+            <div class="mt-4 text-muted small fst-italic text-end">
+                Données OpenStreetMap • ID: ${route.id || 'N/A'}
+            </div>
+        `;
+    }
+
+    // --- AUTOCOMPLETE ---
+    let debounceTimer, abortController;
+    const cityInput = document.getElementById('cityInput');
+    cityInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault(); // Stoppe le rechargement
+        }
+    });
+
+    const suggestionsList = document.getElementById('suggestionsList');
+    const btnNext1 = document.getElementById('btnNext1');
+
+    cityInput.addEventListener('input', (e) => {
+        const q = e.target.value;
+        if(q.length < 3) { suggestionsList.classList.add('d-none'); return; }
+        if(abortController) abortController.abort();
+        abortController = new AbortController();
+        clearTimeout(debounceTimer);
+
+        debounceTimer = setTimeout(async () => {
+            try {
+                const res = await fetch(`/autocomplete?q=${encodeURIComponent(q)}`, {signal: abortController.signal});
+                const data = await res.json();
+                suggestionsList.innerHTML = '';
+                if(data.length) {
+                    data.forEach(p => {
+                        const d = document.createElement('button'); 
+                        
+                        d.type = 'button'; 
+
+                        d.className = 'list-group-item list-group-item-action text-start';
+                        d.innerHTML = `<i class="bi bi-geo-alt text-muted me-2"></i> ${p.label}`;
+                        d.onclick = () => selectCity(p.label, p.lat, p.lon);
+                        suggestionsList.appendChild(d);
+                    });
+                    suggestionsList.classList.remove('d-none');
+                }
+            } catch(e){}
+        }, 300);
+    });
+
+    function selectCity(lbl, lat, lon) {
+        cityInput.value = lbl;
+        document.getElementById('lat').value = lat;
+        document.getElementById('lon').value = lon;
+        suggestionsList.classList.add('d-none');
+        btnNext1.disabled = false;
+    }
+
+    // --- GPS ---
+    document.getElementById('btnGps').addEventListener('click', () => {
+        const status = document.getElementById('gpsStatus');
+        const cityInput = document.getElementById('cityInput');
+        
+        // 1. Vérification du support
+        if (!navigator.geolocation) { 
+            alert("Votre navigateur ne supporte pas la géolocalisation."); 
+            return; 
+        }
+        
+        // 2. Feedback visuel immédiat ("Ça charge...")
+        status.innerHTML = '<div class="spinner-border spinner-border-sm text-primary" role="status"></div> Localisation en cours...';
+        status.className = "text-primary d-block mt-2 text-center fw-bold";
+        cityInput.placeholder = "Recherche satellite...";
+
+        // 3. Appel au GPS du navigateur
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            
+            try {
+                // 4. ENVOI IMMÉDIAT AU PYTHON (/reverse)
+                const response = await fetch(`/reverse?lat=${lat}&lon=${lon}`);
+                const data = await response.json();
+                
+                // 5. Mise à jour de l'interface avec la ville trouvée
+                if (data.city) {
+                    // On affiche le nom de la ville pour rassurer l'utilisateur
+                    cityInput.value = data.city + " (Ma Position)";
+                    
+                    // IMPORTANT : On sauvegarde les coordonnées pour plus tard
+                    document.getElementById('lat').value = lat;
+                    document.getElementById('lon').value = lon;
+                    
+                    // On active le bouton "Continuer"
+                    document.getElementById('btnNext1').disabled = false;
+                    
+                    // Message de succès
+                    status.innerText = "Position trouvée : " + data.city;
+                    status.className = "text-success d-block mt-2 text-center fw-bold";
+                } else {
+                    throw new Error("Ville non trouvée");
+                }
+            } catch(e) {
+                console.error(e);
+                // Fallback : Si l'API plante, on garde quand même les coordonnées GPS
+                cityInput.value = `${lat.toFixed(3)}, ${lon.toFixed(3)}`;
+                document.getElementById('lat').value = lat;
+                document.getElementById('lon').value = lon;
+                document.getElementById('btnNext1').disabled = false;
+                
+                status.innerText = "Adresse inconnue, mais coordonnées GPS valides.";
+                status.className = "text-warning d-block mt-2 text-center";
+            }
+        }, (err) => {
+            // Gestion des erreurs (Refus de l'utilisateur, Timeout...)
+            console.warn(err);
+            status.innerText = "Impossible de vous localiser";
+            status.className = "text-danger d-block mt-2 text-center";
+        }, { 
+            enableHighAccuracy: true, // Demande le GPS précis
+            timeout: 10000, 
+            maximumAge: 0 
+        });
+    });
+
+    // --- NAVIGATION ---
+    function goToStep(n) {
+        document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+        document.getElementById('step'+n).classList.add('active');
+        //document.getElementById('progress').style.width = (n*25)+'%';
+    }
+
+    async function submitForm() {
+        goToStep(4);
+        // Reset de l'interface expert
+        document.getElementById('loadingSection').classList.remove('d-none');
+        document.getElementById('resultsSection').classList.add('d-none');
+        document.getElementById('expertLogs').innerHTML = '<span class="text-secondary">En attente d\'exécution...</span>';
+        document.getElementById('recommendationList').innerHTML = '<div class="text-muted fst-italic text-center py-3">Lancez le moteur...</div>';
+
+        const payload = {
+            // ... (votre payload existant) ...
+             lat: document.getElementById('lat').value,
+            lon: document.getElementById('lon').value,
+            activite: document.querySelector('input[name="activite"]:checked').value,
+            niveau: document.getElementById('niveau').value,
+            fatigue: document.getElementById('fatigue').value,
+            distance: document.getElementById('distance').value,
+            eau: document.getElementById('eau').value,
+            douleur: document.getElementById('douleur').value,
+            meteo: document.getElementById('meteo').value,
+            vent: document.getElementById('vent').value
+        };
+
+        try {
+            const res = await fetch('/submit', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            
+            // Masquer le loader, afficher les résultats
+            document.getElementById('loadingSection').classList.add('d-none');
+            document.getElementById('resultsSection').classList.remove('d-none');
+            
+            const resText = document.getElementById('resultText');
+            resText.innerText = `${data.nb_routes} itinéraires trouvés.`;
+            
+            if(data.nb_routes > 0) initMap(payload.lat, payload.lon, data.routes);
+            
+            // On stocke les routes globalement pour pouvoir les retrouver par ID
+            window.allRoutesData = data.routes; 
+
+        } catch(e) {
+            document.getElementById('loadingSection').innerHTML = `<h4 class="text-danger">Erreur: ${e.message}</h4>`;
+        }
+    }
+    // --- LOGIQUE SYSTEME EXPERT ---
+    async function runExpert(mode) {
+        const logsDiv = document.getElementById('expertLogs');
+        const listDiv = document.getElementById('recommendationList');
+        
+        // Feedback visuel
+        logsDiv.innerHTML = '<div class="spinner-border spinner-border-sm text-light"></div> Raisonnement en cours...';
+        
+        try {
+            const res = await fetch('/run-expert', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ mode: mode })
+            });
+            const data = await res.json();
+
+            // 1. Affichage des logs (avec coloration syntaxique basique)
+            if(data.logs) {
+                // On met en vert les déductions, en rouge les rejets
+                let formattedLogs = data.logs
+                    .replace(/\n/g, '<br>')
+                    .replace(/VALIDÉ/g, '<span class="text-success fw-bold">VALIDÉ</span>')
+                    .replace(/REJETÉ/g, '<span class="text-danger fw-bold">REJETÉ</span>')
+                    .replace(/Règle (.*) déclenchée/g, '<span class="text-warning">Règle $1 déclenchée</span>');
+                
+                logsDiv.innerHTML = formattedLogs;
+                logsDiv.scrollTop = logsDiv.scrollHeight; // Scroll en bas
+            }
+
+            // 2. Affichage de la liste interactive
+            listDiv.innerHTML = '';
+            if (data.recommended_ids && data.recommended_ids.length > 0) {
+                
+                data.recommended_ids.forEach(id => {
+                    // Retrouver les infos de la route dans nos données JS globales
+                    const route = window.allRoutesData.find(r => r.id === id);
+                    
+                    if (route) {
+                        const item = document.createElement('button');
+                        item.type = 'button';
+                        item.className = 'list-group-item list-group-item-action list-group-item-success d-flex justify-content-between align-items-center';
+                        item.innerHTML = `
+                            <div>
+                                <strong>${route.name}</strong><br>
+                                <small>${route.km} km • +${route.denivele}m</small>
+                            </div>
+                            <i class="bi bi-geo-alt-fill"></i>
+                        `;
+                        // Au clic : on simule le clic sur la carte
+                        item.onclick = () => highlightRouteOnMap(id);
+                        listDiv.appendChild(item);
+                    }
+                });
+            } else {
+                listDiv.innerHTML = '<div class="alert alert-warning">Aucun itinéraire ne correspond à vos critères de sécurité.</div>';
+            }
+
+        } catch(e) {
+            logsDiv.innerHTML = `<span class="text-danger">Erreur JS: ${e.message}</span>`;
+        }
+    }
+
+    // Fonction pour surligner une route sur la carte depuis la liste
+    function highlightRouteOnMap(routeId) {
+        // 1. D'ABORD, on fait défiler la page vers la carte de manière fluide
+        const mapElement = document.getElementById('map');
+        mapElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // 2. ENSUITE, on agit sur la carte Leaflet
+        map.eachLayer(layer => {
+            // Nos routes sont des FeatureGroup avec une propriété .info
+            if (layer.info && layer.info.id === routeId) {
+                // On déclenche l'événement click défini dans initMap (met en jaune + popup)
+                layer.fire('click');
+                // On centre la vue de la carte sur ce trajet spécifique
+                map.fitBounds(layer.getBounds(), {
+                    padding: [50, 50],
+                    maxZoom: 15,
+                    animate: true
+                });
+            }
+        });
+    }
+</script>
+</body>
+</html>
