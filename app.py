@@ -5,6 +5,8 @@ import math
 import time
 import subprocess
 import re
+import json
+import os
 
 app = Flask(__name__)
 
@@ -112,40 +114,11 @@ def get_elevation_gain(points):
 
 
 # --- Récupération Routes ---
-def fetch_and_save_routes(lat, lon):
-    radius = 5000
-    print(f"Recherche Overpass autour de {lat}, {lon}")
+def fetch_and_save_routes(lat, lon, demo_mode=False):
+    csv_rows = []       # Pour le fichier Lisp
+    frontend_routes = [] # Pour le site Web
 
-    query = f"""
-    [out:json][timeout:25];
-    (
-      relation["route"~"hiking|bicycle"](around:{radius},{lat},{lon});
-    );
-    out geom qt;
-
-    node(w) -> .nodes;
-    .nodes out tags;
-    """
-
-    try:
-        r = requests.get(
-            "http://overpass-api.de/api/interpreter",
-            params={'data': query},
-            headers={'User-Agent': 'StudentProject/1.0'},
-            timeout=20
-        )
-        r.raise_for_status()
-        data = r.json()
-
-    except Exception as e:
-        print("Erreur Overpass:", e)
-        return []
-
-    frontend_routes = []
-    csv_rows = []
-    compteur_id = 1
-
-    # --- petites fonctions internes simples ---
+    # Fonction de calcul de distance totale d'une liste de points 
     def compute_distance(pts):
         dist = 0
         for i in range(len(pts) - 1):
@@ -155,90 +128,120 @@ def fetch_and_save_routes(lat, lon):
             )
         return dist
 
-    # --- parcours des relations ---
-    for el in data.get("elements", []): 
-        tags = el.get("tags", {})
-        name = tags.get("name", f"Itinéraire {compteur_id}")
-        type_act = "velo" if "bicycle" in tags.get("route", "") else "marche"
+    # MODE DÉMO À COMPIÈGNE
+    if demo_mode:
+        print("Mode chargement du fichier local de trajets à Compiègne")
+        file = "trajets_compiegne.json"
+        
+        if os.path.exists(file):
+            with open(file, "r", encoding="utf-8") as f:
+                frontend_routes = json.load(f)
+            
+            # On reconstruit csv_rows pour le système expert car le JSON a des dictionnaires {}, et le Lisp veut des listes []
+            for r in frontend_routes:
+                row = [
+                    r['id'], r['name'], r['type'], r['diff'], 
+                    "mixte", r['km'], r['denivele']
+                ]
+                csv_rows.append(row)
+        else:
+            print(f"Erreur : Fichier {file} introuvable")
+            return []
 
-        coords = []
-        flat_points = []
+    # MODE NORMAL (Appel API Complexe)
+    else:
+        print(f"Recherche API Overpass autour de {lat}, {lon}")
+        radius = 5000
+        query = f"""
+        [out:json][timeout:25];
+        ( relation["route"~"hiking|bicycle"](around:{radius},{lat},{lon}); );
+        out geom qt;
+        """
+        try:
+            r = requests.get("http://overpass-api.de/api/interpreter", 
+                           params={'data': query}, headers={'User-Agent': 'StudentProject/1.0'}, timeout=20)
+            data = r.json()
 
-        # Extraction points
-        for member in el.get("members", []):
-            seg = member.get("geometry")
-            if not seg:
+        except Exception as e:
+            print("Erreur Overpass:", e)
+            return []
+            
+        compteur_id = 1
+
+        # Parcours des resultats de la requête API et construction des itinéraires
+        for el in data.get("elements", []): 
+            tags = el.get("tags", {})
+            name = tags.get("name", f"Itinéraire {compteur_id}")
+            type_act = "velo" if "bicycle" in tags.get("route", "") else "marche"
+
+            coords = []
+            flat_points = []
+
+            # Extraction points
+            for member in el.get("members", []):
+                seg = member.get("geometry")
+                if not seg:
+                    continue
+
+                segment = []
+
+                for p in seg:
+                    point = {
+                        "lat": p["lat"],
+                        "lon": p["lon"],
+                    }
+                    segment.append(point)
+
+                coords.append(segment)
+                flat_points.extend(segment)
+
+            if len(flat_points) < 2:
                 continue
 
-            segment = []
+            dist_km = compute_distance(flat_points)
 
-            for p in seg:
-                point = {
-                    "lat": p["lat"],
-                    "lon": p["lon"],
-                }
+            # Filtrage simple
+            if not (0.5 < dist_km < 90):
+                continue
 
-                # ALTITUDE SI DISPONIBLE
-                if "ele" in p:
-                    point["ele"] = p["ele"]
+            # Limite nombre de routes
+            if len(frontend_routes) >= 30:
+                break
 
-                segment.append(point)
+            # Dénivelé (simple & optimisé)
+            denivele = get_elevation_gain(flat_points)
 
-            coords.append(segment)
-            flat_points.extend(segment)
+            # Difficulté simplifiée
+            diff = "moyenne"
+            if type_act == "marche":
+                if dist_km < 8 and denivele < 300: diff = "facile"
+                elif dist_km > 20 or denivele > 800: diff = "difficile"
+            else:
+                if dist_km < 20 and denivele < 200: diff = "facile"
+                elif dist_km > 60 or denivele > 1000: diff = "difficile"
 
-        if len(flat_points) < 2:
-            continue
+            csv_rows.append([compteur_id, name, type_act, diff, "mixte", round(dist_km, 2), denivele])
 
-        dist_km = compute_distance(flat_points)
+            frontend_routes.append({
+                "id": compteur_id,
+                "name": name,
+                "km": round(dist_km, 1),
+                "denivele": denivele,
+                "type": type_act,
+                "diff": diff,
+                "segments": coords
+            })
 
-        # Filtrage simple
-        if not (0.5 < dist_km < 90):
-            continue
+            compteur_id += 1
+            time.sleep(0.1)  # Délai pour API OpenElevation
 
-        # Limite nombre de routes
-        if len(frontend_routes) >= 30:
-            break
-
-        # Dénivelé (simple & optimisé)
-        denivele = get_elevation_gain(flat_points)
-
-        # Difficulté simplifiée
-        diff = "moyenne"
-        if type_act == "marche":
-            if dist_km < 8 and denivele < 300: diff = "facile"
-            elif dist_km > 20 or denivele > 800: diff = "difficile"
-        else:
-            if dist_km < 20 and denivele < 200: diff = "facile"
-            elif dist_km > 60 or denivele > 1000: diff = "difficile"
-
-        csv_rows.append([compteur_id, name, type_act, diff, "mixte", round(dist_km, 2), denivele])
-
-        frontend_routes.append({
-            "id": compteur_id,
-            "name": name,
-            "km": round(dist_km, 1),
-            "denivele": denivele,
-            "type": type_act,
-            "diff": diff,
-            "segments": coords
-        })
-
-        compteur_id += 1
-        time.sleep(0.1)  # Délai pour API OpenElevation
+    # PARTIE COMMUNE AUX DEUX MODES
     
-    print(f"Total itinéraires trouvés: {len(frontend_routes)}")
-
-    # Sauvegarde CSV 
-    #with open(FILE_ROUTES, "w", newline="", encoding="utf-8") as f:
-    #    w = csv.writer(f, delimiter=';')
-    #    w.writerow(["ID", "Nom", "Activite", "Difficulte", "Terrain", "Distance", "Denivele"])
-    #    w.writerows(csv_rows)
-    #print("Itinéraires sauvegardés dans", FILE_ROUTES)
-
-    # Sauvegarde BD Lisp
+    # On génère la base de connaissances pour le système expert
     generate_lisp_database(csv_rows)
-
+    
+    # On renvoie les routes au site web
+    print(f"Terminé : {len(frontend_routes)} itinéraires prêts.")
     return frontend_routes
 
 def get_current_temperature(lat, lon):
@@ -257,7 +260,7 @@ def get_current_temperature(lat, lon):
         return data['current_weather']['temperature']
     except Exception as e:
         print(f"Erreur récupération température: {e}")
-        return 20.0 # Valeur par défaut "tempérée" si l'API échoue
+        return 10.0 # Valeur par défaut "tempérée" si l'API échoue
 
 def generate_lisp_database(rows):
     """
@@ -395,14 +398,33 @@ def index(): return render_template('index.html')
 @app.route('/submit', methods=['POST'])
 def submit():
     try:
+        # Récupération des données JSON envoyées par le formulaire (html)
         data = request.json
-        lat = float(data['lat'])
-        lon = float(data['lon'])
+        
+        # Récupération du flag de mode démo (mode à compiègne uniquement)
+        is_demo = data.get('demo_mode', False)
+
+        # Récupération des coordonnées (ou coordonnées de Compiègne en mode démo)
+        if is_demo:
+            lat = 49.405934
+            lon = 2.844366
+        else:
+            lat = float(data['lat'])
+            lon = float(data['lon'])
+
+        # Récupération de la température actuelle
         temp = get_current_temperature(lat, lon)
         data['temperature'] = temp
+
+        # Affichage des données reçues
         print(data)
+
+        # Génération des faits Lisp
         generate_lisp_facts(data)
-        routes = fetch_and_save_routes(lat, lon)
+
+        # Récupération et sauvegarde des itinéraires
+        routes = fetch_and_save_routes(lat, lon, demo_mode=is_demo)
+
         return jsonify({"success": True, "nb_routes": len(routes), "routes": routes})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
