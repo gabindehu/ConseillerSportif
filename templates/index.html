@@ -521,6 +521,9 @@
     }
 
     async function submitForm() {
+        const lat = document.getElementById('lat').value;
+        const lon = document.getElementById('lon').value;
+        
         goToStep(4);
         // Reset de l'interface expert
         document.getElementById('loadingSection').classList.remove('d-none');
@@ -528,9 +531,24 @@
         document.getElementById('expertLogs').innerHTML = '<span class="text-secondary">En attente d\'exécution...</span>';
         document.getElementById('recommendationList').innerHTML = '<div class="text-muted fst-italic text-center py-3">Lancez le moteur...</div>';
 
+        // On récupère la météo depuis le navigateur pour l'envoyer au serveur
+        let temperatureClient = 10.0; // Valeur par défaut
+        try {
+            // On demande la météo directement depuis le navigateur de l'utilisateur
+            const respMeteo = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+            const dataMeteo = await respMeteo.json();
+            
+            if (dataMeteo.current_weather) {
+                temperatureClient = dataMeteo.current_weather.temperature;
+                console.log("Météo récupérée par le navigateur :", temperatureClient);
+            }
+        } catch (err) {
+            console.warn("Météo navigateur échouée, on enverra 10°C par défaut", err);
+        }
+
         const payload = {
-             lat: document.getElementById('lat').value,
-            lon: document.getElementById('lon').value,
+            lat: lat,
+            lon: lon,
             activite: document.querySelector('input[name="activite"]:checked').value,
             niveau: document.getElementById('niveau').value,
             fatigue: document.getElementById('fatigue').value,
@@ -539,7 +557,8 @@
             douleur: document.getElementById('douleur').value,
             meteo: document.getElementById('meteo').value,
             vent: document.getElementById('vent').value,
-            demo_mode: isDemoMode
+            demo_mode: isDemoMode,
+            temperature: temperatureClient,
         };
 
         try {

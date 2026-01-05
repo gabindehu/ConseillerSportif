@@ -236,41 +236,6 @@ def fetch_and_save_routes(lat, lon, demo_mode=False):
     return trajets
 
 def get_current_temperature(lat, lon):
-    print(f"--- DEBUG METEO : Demande pour {lat}, {lon} ---")
-    try:
-        url = "https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "current_weather": "true"
-        }
-        headers = {'User-Agent': 'ConseillerSportifStudentProject/1.0'}
-        
-        r = requests.get(url, params=params, headers=headers, timeout=10)
-        r.raise_for_status()
-        
-        data = r.json()
-        
-        # --- AJOUT : Vérification d'erreur explicite ---
-        if 'error' in data:
-            print(f"--- DEBUG METEO ERREUR API : {data.get('reason')} ---")
-            return 10.0
-
-        if 'current_weather' not in data:
-            # Si la clé manque, on affiche tout le JSON pour comprendre
-            print(f"--- DEBUG METEO FORMAT INATTENDU : {data} ---")
-            return 10.0
-        # -----------------------------------------------
-
-        temp = data['current_weather']['temperature']
-        print(f"--- DEBUG METEO : Succès ! Température reçue : {temp}°C ---")
-        return temp
-
-    except Exception as e:
-        print(f"--- DEBUG METEO EXCEPTION : {e} ---")
-        return 10.0 # Valeur de repli
-
-def get_current_temperature2(lat, lon):
     try:
         # On demande la météo courante pour les coordonnées données
         url = "https://api.open-meteo.com/v1/forecast"
@@ -279,7 +244,7 @@ def get_current_temperature2(lat, lon):
             "longitude": lon,
             "current_weather": "true"
         }
-        r = requests.get(url, params=params, timeout=6)
+        r = requests.get(url, params=params, timeout=5)
         data = r.json()
         
         # On retourne la température (float)
@@ -430,10 +395,6 @@ def submit():
         else:
             lat = float(data['lat'])
             lon = float(data['lon'])
-
-        # Récupération de la température actuelle
-        temp = get_current_temperature(lat, lon)
-        data['temperature'] = temp
 
         # Affichage des données reçues
         print(data)
