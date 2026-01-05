@@ -244,7 +244,7 @@ def get_current_temperature(lat, lon):
             "longitude": lon,
             "current_weather": "true"
         }
-        r = requests.get(url, params=params, timeout=3)
+        r = requests.get(url, params=params, timeout=6)
         data = r.json()
         
         # On retourne la température (float)
