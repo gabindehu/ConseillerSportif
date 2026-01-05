@@ -84,7 +84,7 @@
 ;; LANCEMENT PRINCIPAL (sur la condition recommandation_globale = danger)
 ;; =============================================================================
 
-(format t "~%--- DÉBUT CHAÎNAGE ARRIÈRE ---~%")
+(format t "--- DÉBUT CHAÎNAGE ARRIÈRE ---~%")
 
 ;; BUT : On veut savoir si c'est DANGEREUX
 (defparameter *but-final* '(recommandation_globale danger))
