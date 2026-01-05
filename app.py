@@ -32,7 +32,7 @@ def autocomplete():
     if len(query) < 3: return jsonify([])
     try:
         r = requests.get("https://api-adresse.data.gouv.fr/search/", 
-                         params={'q': query, 'limit': 5, 'type': 'municipality'})
+                         params={'q': query, 'limit': 10, 'type': 'municipality'})
         data = r.json()
         res = []
         for f in data.get('features', []):
@@ -88,7 +88,7 @@ def get_elevation_gain(points):
         r = requests.post(
             "https://api.open-elevation.com/api/v1/lookup", 
             json={"locations": locations}, 
-            timeout=3
+            timeout=5
         )
         data = r.json()
         
