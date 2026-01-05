@@ -153,18 +153,19 @@ def fetch_and_save_routes(lat, lon, demo_mode=False):
         print(f"Recherche API Overpass autour de {lat}, {lon}")
         radius = 5000
         query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:40];
         ( relation["route"~"hiking|bicycle"](around:{radius},{lat},{lon}); );
         out geom qt;
         """
         try:
             r = requests.get("http://overpass-api.de/api/interpreter", 
-                           params={'data': query}, headers={'User-Agent': 'StudentProject/1.0'}, timeout=20)
+                           params={'data': query}, headers={'User-Agent': 'StudentProject/1.0'}, timeout=45)
             data = r.json()
 
         except Exception as e:
-            print("Erreur Overpass:", e)
-            return []
+            print("Erreur API Overpass :", e)
+            print(f"Code retour HTTP: {r.status_code}")
+            data = {"elements": []}
             
         compteur_id = 1
 
