@@ -1,6 +1,5 @@
 from flask import Flask, render_template, request, jsonify
 import requests
-import csv
 import math
 import time
 import subprocess
@@ -10,24 +9,9 @@ import os
 
 app = Flask(__name__)
 
-FILE_ROUTES = "itineraires.csv"
 FILE_FACTS = "faits.lisp"
 
-# --- Mathématiques ---
-def haversine(lat1, lon1, lat2, lon2):
-    try:
-        R = 6371  # Rayon Terre en km
-        dLat = math.radians(lat2 - lat1)
-        dLon = math.radians(lon2 - lon1)
-        a = math.sin(dLat/2) * math.sin(dLat/2) + \
-            math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * \
-            math.sin(dLon/2) * math.sin(dLon/2)
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        return R * c
-    except:
-        return 0
-
-# --- 1. Autocomplete (API Gouv) ---
+# Autocomplétion de la recherche des villes (API Gouv)
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
     query = request.args.get('q', '')
@@ -45,7 +29,7 @@ def autocomplete():
         print(f"Error Autocomplete: {e}")
         return jsonify([])
 
-# --- Reverse GPS (Bouton : Ma Localisation) ---
+# Reverse Geocoding (API Gouv)
 @app.route('/reverse', methods=['GET'])
 def reverse():
     try:
@@ -66,27 +50,24 @@ def reverse():
     except Exception as e:
         print(f"Erreur Reverse: {e}")
     
-    # Fallback si rien trouvé ou erreur
+    # Si rien trouvé ou erreur on retourne une valeur par défaut
     return jsonify({'city': "Position GPS"})
 
-# --- Dénivelé (API OpenElevation) ---
+# Calcul du dénivelé positif cumulé via Open-Elevation API
 def get_elevation_gain(points):
     # Si pas assez de points, pas de dénivelé
     if not points or len(points) < 2:
         return 0
 
-    # 1. ÉCHANTILLONNAGE : On ne prend qu'un point tous les 10 ou 20 mètres environ
-    # pour ne pas envoyer 2000 points à l'API (ce qui serait lent et pourrait bloquer)
-    # On garde le premier et le dernier point, et un peu au milieu.
+    # Échantillonnage des points pour limiter le nombre de requêtes
     step = max(1, len(points) // 50)  # On vise environ 50 points max par trajet
     sampled_points = points[::step]
 
-    # 2. Préparation du payload pour l'API Open-Elevation
-    # L'API attend: {"locations": [{"latitude": 10, "longitude": 10}, ...]}
+    # Préparation des données des points pour l'API
     locations = [{"latitude": p["lat"], "longitude": p["lon"]} for p in sampled_points]
 
     try:
-        # 3. Appel API (Timeout court pour ne pas bloquer l'app si l'API est lente)
+        # Appel API (Timeout court pour ne pas bloquer si l'API est lente)
         r = requests.post(
             "https://api.open-elevation.com/api/v1/lookup", 
             json={"locations": locations}, 
@@ -94,16 +75,17 @@ def get_elevation_gain(points):
         )
         data = r.json()
         
-        # 4. Calcul du dénivelé positif cumulé
+        # Calcul du dénivelé positif cumulé
         elevations = [float(res['elevation']) for res in data['results']]
         
         d_plus = 0
         for i in range(len(elevations) - 1):
             diff = elevations[i+1] - elevations[i]
-            # On ne compte que si ça monte
+            # On ne compte que si la différence est positive
             if diff > 0:
                 d_plus += diff
 
+        # On affiche le dénivelé calculé pour debug
         print(f"Dénivelé calculé: {d_plus} m sur {len(elevations)} points")       
         return int(d_plus)
 
@@ -112,41 +94,48 @@ def get_elevation_gain(points):
         # En cas d'erreur (timeout ou hors ligne), on retourne 0
         return 0
 
+# Fonction utilitaire pour calculer la distance entre deux points GPS
+def haversine(lat1, lon1, lat2, lon2):
+    try:
+        R = 6371  # Rayon Terre en km
+        dLat = math.radians(lat2 - lat1)
+        dLon = math.radians(lon2 - lon1)
+        a = math.sin(dLat/2) * math.sin(dLat/2) + \
+            math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * \
+            math.sin(dLon/2) * math.sin(dLon/2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        return R * c
+    except:
+        return 0
 
-# --- Récupération Routes ---
+# Fonction de calcul de distance totale d'une liste de points 
+def compute_distance(pts):
+    dist = 0
+    for i in range(len(pts) - 1):
+        dist += haversine(
+            pts[i]["lat"], pts[i]["lon"],
+            pts[i+1]["lat"], pts[i+1]["lon"]
+        )
+    return dist
+
 def fetch_and_save_routes(lat, lon, demo_mode=False):
-    csv_rows = []       # Pour le fichier Lisp
-    frontend_routes = [] # Pour le site Web
+    """ 
+    Fonction principale pour récupérer les itinéraires autour d'une position GPS.
+    Si demo_mode est True, on charge un fichier local de trajets à Compiègne.
+    Sinon, on interroge l'API Overpass pour obtenir les itinéraires de randonnée et vélo autour de la position.
+    """
+    trajets = [] # Liste des trajets pour le site Web et pour construire fichier Lisp de la base de connaissances
 
-    # Fonction de calcul de distance totale d'une liste de points 
-    def compute_distance(pts):
-        dist = 0
-        for i in range(len(pts) - 1):
-            dist += haversine(
-                pts[i]["lat"], pts[i]["lon"],
-                pts[i+1]["lat"], pts[i+1]["lon"]
-            )
-        return dist
-
-    # MODE DÉMO À COMPIÈGNE
+    # MODE DÉMO À COMPIÈGNE QUI CHARGE UN FICHIER LOCAL
     if demo_mode:
         print("Mode chargement du fichier local de trajets à Compiègne")
         file = "trajets_compiegne.json"
         
         if os.path.exists(file):
             with open(file, "r", encoding="utf-8") as f:
-                frontend_routes = json.load(f)
-            
-            # On reconstruit csv_rows pour le système expert car le JSON a des dictionnaires {}, et le Lisp veut des listes []
-            for r in frontend_routes:
-                row = [
-                    r['id'], r['name'], r['type'], r['diff'], 
-                    "mixte", r['km'], r['denivele']
-                ]
-                csv_rows.append(row)
+                trajets = json.load(f)
         else:
             print(f"Erreur : Fichier {file} introuvable")
-            return []
 
     # MODE NORMAL (Appel API Complexe)
     else:
@@ -169,16 +158,22 @@ def fetch_and_save_routes(lat, lon, demo_mode=False):
             
         compteur_id = 1
 
-        # Parcours des resultats de la requête API et construction des itinéraires
+        # Parcours des resultats de la requête API Overpass et extraction des itinéraires
         for el in data.get("elements", []): 
+            # On limite à 30 itinéraires
+            if len(trajets) >= 30:
+                break
+
             tags = el.get("tags", {})
             name = tags.get("name", f"Itinéraire {compteur_id}")
+
+            # Détermination du type d'activité (marche ou vélo)
             type_act = "velo" if "bicycle" in tags.get("route", "") else "marche"
 
             coords = []
             flat_points = []
 
-            # Extraction points
+            # Extraction des points
             for member in el.get("members", []):
                 seg = member.get("geometry")
                 if not seg:
@@ -199,20 +194,17 @@ def fetch_and_save_routes(lat, lon, demo_mode=False):
             if len(flat_points) < 2:
                 continue
 
+            # Calcul de la distance totale
             dist_km = compute_distance(flat_points)
 
-            # Filtrage simple
+            # Filtrage simple des distances (on évite trop court ou trop long)
             if not (0.5 < dist_km < 90):
                 continue
 
-            # Limite nombre de routes
-            if len(frontend_routes) >= 30:
-                break
-
-            # Dénivelé (simple & optimisé)
+            # Calcul du dénivelé positif cumulé
             denivele = get_elevation_gain(flat_points)
 
-            # Difficulté simplifiée
+            # Estimation de la difficulté (simple mais affinée lors de l'inférence par le système expert)
             diff = "moyenne"
             if type_act == "marche":
                 if dist_km < 8 and denivele < 300: diff = "facile"
@@ -221,9 +213,7 @@ def fetch_and_save_routes(lat, lon, demo_mode=False):
                 if dist_km < 20 and denivele < 200: diff = "facile"
                 elif dist_km > 60 or denivele > 1000: diff = "difficile"
 
-            csv_rows.append([compteur_id, name, type_act, diff, "mixte", round(dist_km, 2), denivele])
-
-            frontend_routes.append({
+            trajets.append({
                 "id": compteur_id,
                 "name": name,
                 "km": round(dist_km, 1),
@@ -237,17 +227,17 @@ def fetch_and_save_routes(lat, lon, demo_mode=False):
             time.sleep(0.1)  # Délai pour API OpenElevation
 
     # PARTIE COMMUNE AUX DEUX MODES
-    
+
     # On génère la base de connaissances pour le système expert
-    generate_lisp_database(csv_rows)
+    generate_lisp_database(trajets)
     
     # On renvoie les routes au site web
-    print(f"Terminé : {len(frontend_routes)} itinéraires prêts.")
-    return frontend_routes
+    print(f"Terminé : {len(trajets)} itinéraires prêts.")
+    return trajets
 
 def get_current_temperature(lat, lon):
     try:
-        # On demande juste la météo courante
+        # On demande la météo courante pour les coordonnées données
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
             "latitude": lat,
@@ -263,7 +253,7 @@ def get_current_temperature(lat, lon):
         print(f"Erreur récupération température: {e}")
         return 10.0 # Valeur par défaut "tempérée" si l'API échoue
 
-def generate_lisp_database(rows):
+def generate_lisp_database(routes_list):
     """
     Génère un fichier itineraires.lisp définissant une variable globale *base-itineraires*
     Structure de rows attendue : [ID, Nom, Activite, Difficulte, Terrain, Distance, Denivele]
@@ -271,22 +261,21 @@ def generate_lisp_database(rows):
     lisp_file = "itineraires.lisp"
     try:
         with open(lisp_file, 'w', encoding='utf-8') as f:
-            # On déclare une variable globale (defparameter ...)
             f.write("(defparameter *base-itineraires* '(\n")
             
-            for row in rows:
-                # Récupération des champs (selon votre structure CSV)
-                # row = [ID, Nom, Activite, Difficulte, Terrain, Distance, Denivele]
-                id_itin = row[0]
-                nom = row[1].replace('"', '\\"') # Échapper les guillemets dans les noms
-                activite = row[2].lower()         # Symbole (ex: velo)
-                difficulte = row[3].lower()       # Symbole (ex: difficile)
-                terrain = row[4].lower()          # Symbole (ex: mixte)
-                distance = row[5]                 # Nombre
-                denivele = row[6]                 # Nombre
+            for route in routes_list:
+                # Récupération par Clés (= ids)
+                id_itin = route['id']
+                nom = route['name'].replace('"', '\\"')
+                activite = route['type']      # 'velo' ou 'marche'
+                difficulte = route['diff']    # 'facile', 'difficile'...
+                distance = route['km']
+                denivele = route['denivele']
+                
+                # Le terrain n'est pas stocké dans l'objet, on met une valeur par défaut
+                terrain = route.get('terrain', 'mixte') 
 
-                # Écriture de la ligne au format liste Lisp
-                # Ex: (1 "Balade en forêt" velo facile terre 12.5 50)
+                # Écriture dans le fichier Lisp par ligne
                 line = f'    ({id_itin} "{nom}" {activite} {difficulte} {terrain} {distance} {denivele})\n'
                 f.write(line)
             
@@ -300,14 +289,14 @@ def generate_lisp_facts(d):
         with open(FILE_FACTS, 'w', encoding='utf-8') as f:
             f.write("(defparameter *faits-utilisateur* (list\n")
             
-            # 1. Liste des champs de type Booléen : Si absent du dictionnaire -> On veut 'faux'
+            # Liste des champs de type Booléen, si absent on considère 'faux'
             bool_fields = {
                 'fatigue': 'etat_fatigue',
                 'eau': 'eau',
                 'equipement': 'equipement_adapte'
             }
             
-            # 2. Liste des champs Symboliques / Numérique : si absent car par d'envoi de l'html -> On garde 'nil'
+            # Liste des champs Symboliques / Numérique, si absent car par d'envoi de l'html on garde 'nil'
             other_fields = {
                 'activite': 'activite',
                 'niveau': 'niveau_utilisateur',
@@ -318,10 +307,10 @@ def generate_lisp_facts(d):
                 'temperature': 'temperature'
             }
 
-            # Traitement des booléens (Gestion du "non coché" = faux)
+            # Traitement des booléens 
             for k_py, k_lisp in bool_fields.items():
                 val = d.get(k_py, 'false') 
-                # On convertit en string et minuscule pour être sûr
+                # On convertit en string minuscule pour uniformiser
                 val_str = str(val).lower()
                 
                 # On ajoute 'vrai' à la liste des valeurs acceptées
@@ -342,36 +331,30 @@ def generate_lisp_facts(d):
     except Exception as e:
         print(f"Erreur génération faits: {e}")
 
-# --- Exécution du Système Expert ---
+# Route pour exécuter le système expert Lisp : chaînage avant ou arrière
 @app.route('/run-expert', methods=['POST'])
 def run_expert():
     mode = request.json.get('mode', 'avant') # 'avant' ou 'arriere'
     
-    # On s'assure que les fichiers faits.lisp et itineraires.lisp sont bien là 
-    # (normalement générés par /submit juste avant)
-
+    # On s'assure que les fichiers faits.lisp et itineraires.lisp sont bien là (normalement générés par /submit juste avant)
     command = ["sbcl", "--script", mode+".lisp"]
-    
-    # Si plus tard vous faites un fichier différent pour le chaînage arrière :
-    # if mode == 'arriere': command = ["sbcl", "--script", "chainage_arriere.lisp"]
 
     try:
-        # 1. Exécution de la commande Lisp
+        # Exécution de la commande Lisp
         print(f"Exécution de : {' '.join(command)}")
         result = subprocess.run(
             command, 
             capture_output=True, 
             text=True, 
             encoding='utf-8',
-            timeout=10 # Sécurité pour ne pas bloquer si boucle infinie
+            timeout=10 # Sécurité pour ne pas bloquer indéfiniment
         )
         
         output_logs = result.stdout
         error_logs = result.stderr
 
-        # 2. Parsing des résultats (On cherche les IDs VALIDÉ dans les logs)
+        # On cherche les IDs validés par le moteur d'inférence dans les logs pour les renvoyer au front pour afficher la liste des recommandations
         # On cherche le pattern : "Itinéraire X (...) ... VALIDÉ"
-        # Adaptez la regex si votre message de sortie change dans le Lisp
         recommended_ids = []
         for line in output_logs.splitlines():
             if "VALIDÉ" in line:
@@ -399,7 +382,7 @@ def index(): return render_template('index.html')
 @app.route('/submit', methods=['POST'])
 def submit():
     try:
-        # Récupération des données JSON envoyées par le formulaire (html)
+        # Récupération des données JSON envoyées par le formulaire (données utilisateur et coordonnées GPS)
         data = request.json
         
         # Récupération du flag de mode démo (mode à compiègne uniquement)

@@ -25,16 +25,14 @@
             overflow: hidden; 
             background: white;
             width: 100%;
-            max-width: 1200px; /* Largeur max augmentée */
+            max-width: 1200px;
             margin: 0 auto;
         }
         
         .card-header { background: #198754; color: white; padding: 20px; text-align: center; }
         
-        /* Carte plus haute */
         #map { height: 500px; width: 100%; border-radius: 10px; margin-top: 20px; display: none; border: 2px solid #ddd; }
         
-        /* Panneau de détails */
         #route-details {
             background: white; border-radius: 10px; padding: 15px; margin-top: 15px;
             border-left: 5px solid #198754; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
@@ -45,7 +43,6 @@
         .badge-velo { background-color: #0d6efd; color: white; padding: 8px 15px; border-radius: 20px; font-size: 0.9em;}
         .badge-marche { background-color: #dc3545; color: white; padding: 8px 15px; border-radius: 20px; font-size: 0.9em;}
 
-        /* Autocomplete */
         .suggestions-wrapper { position: relative; }
         .list-group-suggestions { position: absolute; top: 100%; left: 0; right: 0; z-index: 1000; max-height: 250px; overflow-y: auto; box-shadow: 0 5px 15px rgba(0,0,0,0.1); border-radius: 0 0 10px 10px; background: white; }
         .list-group-item-action { cursor: pointer; }
@@ -342,11 +339,9 @@
         const panel = document.getElementById('route-details');
         let badgeClass = route.type === 'velo' ? 'badge-velo' : 'badge-marche';
         
-        // ICONES CORRIGÉES
         let icon = route.type === 'velo' ? '<i class="bi bi-bicycle"></i>' : '<i class="bi bi-person-fill"></i>';
         let label = route.type === 'velo' ? 'Vélo' : 'Marche';
         
-        // DIFFICULTÉ CORRIGÉE
         const diffLabel = (route.diff || 'moyenne').charAt(0).toUpperCase() + (route.diff || 'moyenne').slice(1);
 
         panel.style.display = 'block';
@@ -387,7 +382,7 @@
     const cityInput = document.getElementById('cityInput');
     cityInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-            e.preventDefault(); // Stoppe le rechargement
+            e.preventDefault(); 
         }
     });
 
@@ -395,6 +390,7 @@
     const btnNext1 = document.getElementById('btnNext1');
 
     cityInput.addEventListener('input', (e) => {
+        isDemoMode = false;
         const q = e.target.value;
         if(q.length < 3) { suggestionsList.classList.add('d-none'); return; }
         if(abortController) abortController.abort();
@@ -424,6 +420,7 @@
     });
 
     function selectCity(lbl, lat, lon) {
+        isDemoMode = false;
         cityInput.value = lbl;
         document.getElementById('lat').value = lat;
         document.getElementById('lon').value = lon;
@@ -433,36 +430,37 @@
 
     // --- GPS ---
     document.getElementById('btnGps').addEventListener('click', () => {
+        isDemoMode = false;
         const status = document.getElementById('gpsStatus');
         const cityInput = document.getElementById('cityInput');
         
-        // 1. Vérification du support
+        // Vérification du support
         if (!navigator.geolocation) { 
             alert("Votre navigateur ne supporte pas la géolocalisation."); 
             return; 
         }
         
-        // 2. Feedback visuel immédiat ("Ça charge...")
+        // Feedback visuel immédiat
         status.innerHTML = '<div class="spinner-border spinner-border-sm text-primary" role="status"></div> Localisation en cours...';
         status.className = "text-primary d-block mt-2 text-center fw-bold";
         cityInput.placeholder = "Recherche satellite...";
 
-        // 3. Appel au GPS du navigateur
+        // Appel au GPS du navigateur
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
             
             try {
-                // 4. ENVOI IMMÉDIAT AU PYTHON (/reverse)
+                // Envoi au serveur python avec la route /reverse
                 const response = await fetch(`/reverse?lat=${lat}&lon=${lon}`);
                 const data = await response.json();
                 
-                // 5. Mise à jour de l'interface avec la ville trouvée
+                // Mise à jour de l'interface avec la ville trouvée
                 if (data.city) {
-                    // On affiche le nom de la ville pour rassurer l'utilisateur
+                    // On affiche le nom de la ville pour l'utilisateur
                     cityInput.value = data.city + " (Ma Position)";
                     
-                    // IMPORTANT : On sauvegarde les coordonnées pour plus tard
+                    // n sauvegarde les coordonnées pour plus tard
                     document.getElementById('lat').value = lat;
                     document.getElementById('lon').value = lon;
                     
@@ -477,7 +475,7 @@
                 }
             } catch(e) {
                 console.error(e);
-                // Fallback : Si l'API plante, on garde quand même les coordonnées GPS
+                // Si l'API plante, on garde quand même les coordonnées GPS
                 cityInput.value = `${lat.toFixed(3)}, ${lon.toFixed(3)}`;
                 document.getElementById('lat').value = lat;
                 document.getElementById('lon').value = lon;
@@ -492,7 +490,7 @@
             status.innerText = "Impossible de vous localiser";
             status.className = "text-danger d-block mt-2 text-center";
         }, { 
-            enableHighAccuracy: true, // Demande le GPS précis
+            enableHighAccuracy: false,
             timeout: 10000, 
             maximumAge: 0 
         });
@@ -502,24 +500,23 @@
     function goToStep(n) {
         document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
         document.getElementById('step'+n).classList.add('active');
-        //document.getElementById('progress').style.width = (n*25)+'%';
     }
 
     let isDemoMode = false;
 
     function activateDemoMode() {
-        // 1. Coordonnées de Compiègne en dur
+        // Coordonnées de Compiègne si mode démo
         document.getElementById('lat').value = "49.4179";
         document.getElementById('lon').value = "2.8260";
         document.getElementById('cityInput').value = "Compiègne (Mode Démo)";
         
-        // 2. Activation du flag
+        // Activation du flag
         isDemoMode = true;
         
-        // 3. Débloquer l'interface
+        // Débloquer l'interface
         document.getElementById('btnNext1').disabled = false;
         
-        // Optionnel : passer directement à l'étape suivante
+        // Passer directement à l'étape suivante
         goToStep(2);
     }
 
@@ -532,7 +529,6 @@
         document.getElementById('recommendationList').innerHTML = '<div class="text-muted fst-italic text-center py-3">Lancez le moteur...</div>';
 
         const payload = {
-            // ... (votre payload existant) ...
              lat: document.getElementById('lat').value,
             lon: document.getElementById('lon').value,
             activite: document.querySelector('input[name="activite"]:checked').value,
@@ -555,7 +551,6 @@
 
             isDemoMode = false;
             
-            // Masquer le loader, afficher les résultats
             document.getElementById('loadingSection').classList.add('d-none');
             document.getElementById('resultsSection').classList.remove('d-none');
             
@@ -575,8 +570,7 @@
     async function runExpert(mode) {
         const logsDiv = document.getElementById('expertLogs');
         const listDiv = document.getElementById('recommendationList');
-        
-        // Feedback visuel
+ 
         logsDiv.innerHTML = '<div class="spinner-border spinner-border-sm text-light"></div> Raisonnement en cours...';
         
         try {
@@ -586,7 +580,7 @@
             });
             const data = await res.json();
 
-            // 1. Affichage des logs (avec coloration syntaxique basique)
+            // Affichage des logs (avec coloration syntaxique basique)
             if(data.logs) {
                 // On met en vert les déductions, en rouge les rejets
                 let formattedLogs = data.logs
@@ -599,7 +593,7 @@
                 logsDiv.scrollTop = logsDiv.scrollHeight; // Scroll en bas
             }
 
-            // 2. Affichage de la liste interactive
+            // Affichage de la liste interactive
             listDiv.innerHTML = '';
             if (data.recommended_ids && data.recommended_ids.length > 0) {
                 
@@ -634,11 +628,11 @@
 
     // Fonction pour surligner une route sur la carte depuis la liste
     function highlightRouteOnMap(routeId) {
-        // 1. D'ABORD, on fait défiler la page vers la carte de manière fluide
+        // On fait défiler la page vers la carte de manière fluide
         const mapElement = document.getElementById('map');
         mapElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-        // 2. ENSUITE, on agit sur la carte Leaflet
+        // On agit sur la carte Leaflet
         map.eachLayer(layer => {
             // Nos routes sont des FeatureGroup avec une propriété .info
             if (layer.info && layer.info.id === routeId) {
