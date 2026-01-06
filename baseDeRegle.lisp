@@ -101,7 +101,7 @@
           ((risque_meteo eleve)))
 
     ;; --- R15 : Danger Déshydratation (Longue distance sans eau) ---
-    (R15 ((equal objectif_distance longue) (equal eau faux)) ;; Attention: 'faux' ou 'nil' selon votre index.html
+    (R15 ((equal objectif_distance longue) (equal eau faux))
          ((risque_securite_perso eleve)))
 
     ;; --- R18 : Danger Technique (VTT sur technique sans équipement) ---
